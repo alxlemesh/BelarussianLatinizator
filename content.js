@@ -46,9 +46,36 @@
   }
 
   /**
-   * Process a single text node with optional auto-translation
+   * Process a single text node (without auto-translation - use processPageWithTranslation for batch)
    */
-  async function processTextNode(node) {
+  function processTextNode(node, translatedText = null) {
+    if (
+      !translationEnabled ||
+      !node ||
+      !node.nodeValue ||
+      processedNodes.has(node)
+    ) {
+      return;
+    }
+
+    let textToProcess = translatedText || node.nodeValue;
+
+    // Check if the text contains Belarusian characters
+    if (belarusianTransliterator.isBelarusian(textToProcess)) {
+      const transliteratedText =
+        belarusianTransliterator.transliterate(textToProcess);
+
+      if (transliteratedText !== node.nodeValue) {
+        node.nodeValue = transliteratedText;
+        processedNodes.add(node);
+      }
+    }
+  }
+
+  /**
+   * Process a single text node with auto-translation (for dynamic content)
+   */
+  async function processTextNodeWithAutoTranslate(node) {
     if (
       !translationEnabled ||
       !node ||
@@ -87,9 +114,45 @@
   }
 
   /**
-   * Process element attributes that contain text
+   * Process element attributes that contain text (without auto-translation - use processPageWithTranslation for batch)
    */
-  async function processElementAttributes(element) {
+  function processElementAttributes(element, translatedAttributes = null) {
+    if (!element || !element.getAttribute) {
+      return;
+    }
+
+    // Attributes that commonly contain visible text (excluding value)
+    const textAttributes = [
+      "placeholder",
+      "aria-label",
+      "aria-placeholder",
+      "title",
+      "alt",
+      "label",
+      "data-tooltip",
+    ];
+
+    for (const attr of textAttributes) {
+      const value = element.getAttribute(attr);
+      if (value) {
+        let textToProcess = translatedAttributes?.[attr] || value;
+
+        if (belarusianTransliterator.isBelarusian(textToProcess)) {
+          const transliteratedValue =
+            belarusianTransliterator.transliterate(textToProcess);
+          if (transliteratedValue !== value) {
+            element.setAttribute(attr, transliteratedValue);
+          }
+        }
+      }
+    }
+    // Note: Input/textarea values are NOT processed to avoid interfering with user input
+  }
+
+  /**
+   * Process element attributes with auto-translation (for dynamic content)
+   */
+  async function processElementAttributesWithAutoTranslate(element) {
     if (!element || !element.getAttribute) {
       return;
     }
@@ -151,13 +214,13 @@
     }
 
     // Process element attributes
-    await processElementAttributes(element);
+    processElementAttributes(element);
 
     // Process attributes of all child elements
     if (element.querySelectorAll) {
       const children = Array.from(element.querySelectorAll("*"));
       for (const child of children) {
-        await processElementAttributes(child);
+        processElementAttributes(child);
       }
     }
 
@@ -181,17 +244,179 @@
 
     // Process collected nodes
     for (const node of nodesToProcess) {
-      await processTextNode(node);
+      processTextNode(node);
     }
 
     processedNodes.add(element);
   }
 
   /**
+   * Process the entire page with batch translation
+   */
+  async function processPageWithTranslation() {
+    if (!document.body) {
+      return;
+    }
+
+    // Skip script, style, and other non-text elements
+    const skipTags = ["SCRIPT", "STYLE", "NOSCRIPT", "IFRAME", "OBJECT"];
+
+    // Collect all text nodes
+    const textNodes = [];
+    const walker = document.createTreeWalker(
+      document.body,
+      NodeFilter.SHOW_TEXT,
+      {
+        acceptNode: function (node) {
+          // Skip empty or whitespace-only text nodes
+          if (!node.nodeValue || !node.nodeValue.trim()) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          // Skip text in script/style elements
+          let parent = node.parentElement;
+          while (parent) {
+            if (skipTags.includes(parent.tagName)) {
+              return NodeFilter.FILTER_REJECT;
+            }
+            parent = parent.parentElement;
+          }
+          return NodeFilter.FILTER_ACCEPT;
+        },
+      }
+    );
+
+    let currentNode;
+    while ((currentNode = walker.nextNode())) {
+      textNodes.push(currentNode);
+    }
+
+    // Collect all elements with attributes
+    const elementsWithAttrs = [];
+    const textAttributes = [
+      "placeholder",
+      "aria-label",
+      "aria-placeholder",
+      "title",
+      "alt",
+      "label",
+      "data-tooltip",
+    ];
+
+    const allElements = Array.from(document.body.querySelectorAll("*"));
+    for (const element of allElements) {
+      if (skipTags.includes(element.tagName)) continue;
+
+      for (const attr of textAttributes) {
+        if (element.getAttribute(attr)) {
+          elementsWithAttrs.push(element);
+          break;
+        }
+      }
+    }
+
+    // Batch translate if auto-translate is enabled
+    if (autoTranslateEnabled) {
+      // Collect all texts that need translation
+      const textsToTranslate = [];
+      const textNodeIndices = [];
+      const attrData = [];
+
+      // Helper function to check if text should be translated
+      const shouldTranslate = (text) => {
+        if (!text || text.trim().length === 0) return false;
+        if (belarusianTransliterator.isBelarusian(text)) return false;
+
+        // Skip numeric-only content (like "5", "123", etc.)
+        if (/^\d+$/.test(text.trim())) return false;
+
+        // Skip very short texts (1-2 characters) that are likely labels or symbols
+        if (text.trim().length <= 2) return false;
+
+        // Skip texts that are just punctuation or symbols
+        if (/^[^\w\u0400-\u04FF]+$/.test(text.trim())) return false;
+
+        return true;
+      };
+
+      // Collect text node contents
+      textNodes.forEach((node, index) => {
+        if (shouldTranslate(node.nodeValue)) {
+          textsToTranslate.push(node.nodeValue);
+          textNodeIndices.push(index);
+        }
+      });
+
+      // Collect attribute texts
+      elementsWithAttrs.forEach((element) => {
+        const attrs = {};
+        let hasNonBelarusian = false;
+
+        for (const attr of textAttributes) {
+          const value = element.getAttribute(attr);
+          if (value && shouldTranslate(value)) {
+            attrs[attr] = value;
+            textsToTranslate.push(value);
+            hasNonBelarusian = true;
+          }
+        }
+
+        if (hasNonBelarusian) {
+          attrData.push({ element, attrs });
+        }
+      });
+
+      // Batch translate all texts at once
+      if (textsToTranslate.length > 0) {
+        try {
+          console.log(
+            `Łacinka: Batch translating ${textsToTranslate.length} texts...`
+          );
+          const translatedTexts = await googleTranslateHelper.batchTranslate(
+            textsToTranslate
+          );
+
+          // Apply translations to text nodes
+          let translationIndex = 0;
+          for (let i = 0; i < textNodeIndices.length; i++) {
+            const nodeIndex = textNodeIndices[i];
+            const translatedText = translatedTexts[translationIndex++];
+            processTextNode(textNodes[nodeIndex], translatedText);
+          }
+
+          // Apply translations to attributes
+          for (const { element, attrs } of attrData) {
+            const translatedAttrs = {};
+            for (const attr in attrs) {
+              translatedAttrs[attr] = translatedTexts[translationIndex++];
+            }
+            processElementAttributes(element, translatedAttrs);
+          }
+
+          console.log("Łacinka: Batch translation complete");
+        } catch (e) {
+          console.error("Łacinka: Batch translation failed", e);
+        }
+      }
+    }
+
+    // Process remaining text nodes (already Belarusian or translation disabled)
+    for (const node of textNodes) {
+      processTextNode(node);
+    }
+
+    // Process remaining attributes
+    for (const element of elementsWithAttrs) {
+      processElementAttributes(element);
+    }
+  }
+
+  /**
    * Process the entire page
    */
   async function processPage() {
-    if (document.body) {
+    if (autoTranslateEnabled) {
+      await processPageWithTranslation();
+    } else if (document.body) {
       await processElement(document.body);
     }
   }
@@ -211,7 +436,7 @@
           if (node.nodeType === Node.ELEMENT_NODE) {
             await processElement(node);
           } else if (node.nodeType === Node.TEXT_NODE) {
-            await processTextNode(node);
+            await processTextNodeWithAutoTranslate(node);
           }
         }
 
@@ -222,7 +447,7 @@
         ) {
           // Remove from processed set to allow re-processing
           processedNodes.delete(mutation.target);
-          await processTextNode(mutation.target);
+          await processTextNodeWithAutoTranslate(mutation.target);
         }
 
         // Process attribute changes
@@ -230,7 +455,7 @@
           mutation.type === "attributes" &&
           mutation.target.nodeType === Node.ELEMENT_NODE
         ) {
-          await processElementAttributes(mutation.target);
+          await processElementAttributesWithAutoTranslate(mutation.target);
         }
       });
     });

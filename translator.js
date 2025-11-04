@@ -128,7 +128,7 @@ class GoogleTranslateHelper {
   }
 
   /**
-   * Batch translate multiple texts at once
+   * Batch translate multiple texts at once (with chunking to avoid URL length limits)
    * Returns array of translated texts in same order as input
    */
   async batchTranslate(texts) {
@@ -136,49 +136,88 @@ class GoogleTranslateHelper {
       return [];
     }
 
-    const results = [];
-    
+    const results = new Array(texts.length);
+    const separator = " ◆◇◆ ";
+    const maxUrlLength = 6000; // Safe limit for URL length (Google allows ~8KB)
+    const maxChunkSize = 50; // Maximum texts per chunk
+
     // Filter out empty texts and track indices
-    const nonEmptyTexts = [];
-    const nonEmptyIndices = [];
-    
+    const nonEmptyData = [];
     texts.forEach((text, index) => {
       if (text && text.trim().length > 0) {
-        nonEmptyTexts.push(text);
-        nonEmptyIndices.push(index);
+        nonEmptyData.push({ text, index });
+      } else {
+        results[index] = text; // Keep empty texts as-is
       }
     });
 
-    if (nonEmptyTexts.length === 0) {
+    if (nonEmptyData.length === 0) {
       return texts;
     }
 
-    // Combine all texts with a unique separator
-    const separator = " ◆◇◆ ";
-    const combinedText = nonEmptyTexts.join(separator);
+    // Split into chunks based on URL length and count
+    const chunks = [];
+    let currentChunk = [];
+    let currentLength = 0;
 
-    try {
-      // Translate combined text
-      const translatedCombined = await this.translateToBelarusian(combinedText);
-      
-      // Split back into individual translations
-      const translatedParts = translatedCombined.split(separator);
-      
-      // Rebuild results array with original order
-      for (let i = 0; i < texts.length; i++) {
-        if (!texts[i] || texts[i].trim().length === 0) {
-          results[i] = texts[i];
-        } else {
-          const nonEmptyIndex = nonEmptyIndices.indexOf(i);
-          results[i] = translatedParts[nonEmptyIndex] || texts[i];
-        }
+    for (const item of nonEmptyData) {
+      const itemLength =
+        encodeURIComponent(item.text).length + separator.length;
+
+      // Start new chunk if adding this item would exceed limits
+      if (
+        currentChunk.length > 0 &&
+        (currentLength + itemLength > maxUrlLength ||
+          currentChunk.length >= maxChunkSize)
+      ) {
+        chunks.push(currentChunk);
+        currentChunk = [];
+        currentLength = 0;
       }
-      
-      return results;
-    } catch (e) {
-      console.error("Łacinka: Batch translation failed", e);
-      return texts; // Return original texts on failure
+
+      currentChunk.push(item);
+      currentLength += itemLength;
     }
+
+    // Add remaining chunk
+    if (currentChunk.length > 0) {
+      chunks.push(currentChunk);
+    }
+
+    // Process each chunk
+    for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
+      const chunk = chunks[chunkIndex];
+      const combinedText = chunk.map((item) => item.text).join(separator);
+
+      try {
+        // Translate combined text
+        const translatedCombined = await this.translateToBelarusian(
+          combinedText
+        );
+
+        // Split back into individual translations
+        const translatedParts = translatedCombined.split(separator);
+
+        // Map results back to original indices
+        chunk.forEach((item, i) => {
+          results[item.index] = translatedParts[i] || item.text;
+        });
+
+        console.log(
+          `Łacinka: Translated chunk ${chunkIndex + 1}/${chunks.length} (${
+            chunk.length
+          } texts)`
+        );
+      } catch (e) {
+        console.error(`Łacinka: Chunk ${chunkIndex + 1} translation failed`, e);
+        // On failure, keep original texts
+        chunk.forEach((item) => {
+          results[item.index] = item.text;
+        });
+      }
+    }
+
+    return results;
   }
 
   /**

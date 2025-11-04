@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "description": "Converts Belarusian Cyrillic text to Łacinka (Latin script) on any website",
   "permissions": ["storage", "activeTab"],
+  "host_permissions": ["https://translate.googleapis.com/*"],
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
