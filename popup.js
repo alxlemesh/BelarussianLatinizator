@@ -4,6 +4,7 @@
 
 // DOM Elements
 const globalToggle = document.getElementById("globalToggle");
+const autoTranslateToggle = document.getElementById("autoTranslateToggle");
 const currentUrlEl = document.getElementById("currentUrl");
 const enableSiteBtn = document.getElementById("enableSite");
 const disableSiteBtn = document.getElementById("disableSite");
@@ -32,6 +33,7 @@ function getDomain(url) {
 async function loadSettings() {
   const result = await chrome.storage.sync.get({
     enabled: true,
+    autoTranslate: false,
     enabledSites: [],
   });
   return result;
@@ -52,6 +54,10 @@ async function updateUI() {
 
   // Update global toggle
   globalToggle.checked = settings.enabled;
+
+  // Update auto-translate toggle
+  autoTranslateToggle.checked = settings.autoTranslate;
+  autoTranslateToggle.disabled = !settings.enabled;
 
   // Get current tab
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -133,6 +139,28 @@ async function toggleGlobalState() {
         enabled: settings.enabled,
       })
       .catch(() => {}); // Ignore errors for tabs without content script
+  });
+
+  updateUI();
+}
+
+/**
+ * Toggle auto-translate feature
+ */
+async function toggleAutoTranslate() {
+  const settings = await loadSettings();
+  settings.autoTranslate = autoTranslateToggle.checked;
+  await saveSettings(settings);
+
+  // Notify all tabs
+  const tabs = await chrome.tabs.query({});
+  tabs.forEach((tab) => {
+    chrome.tabs
+      .sendMessage(tab.id, {
+        action: "updateAutoTranslate",
+        autoTranslate: settings.autoTranslate,
+      })
+      .catch(() => {});
   });
 
   updateUI();
@@ -230,6 +258,7 @@ async function clearAllSites() {
 
 // Event Listeners
 globalToggle.addEventListener("change", toggleGlobalState);
+autoTranslateToggle.addEventListener("change", toggleAutoTranslate);
 enableSiteBtn.addEventListener("click", enableCurrentSite);
 disableSiteBtn.addEventListener("click", disableCurrentSite);
 refreshPageBtn.addEventListener("click", refreshCurrentPage);

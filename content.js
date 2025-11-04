@@ -11,6 +11,7 @@
   // Extension state
   let extensionEnabled = true;
   let translationEnabled = false;
+  let autoTranslateEnabled = false;
   let observer = null;
 
   /**
@@ -27,10 +28,12 @@
     try {
       const result = await chrome.storage.sync.get({
         enabled: true,
+        autoTranslate: false,
         enabledSites: [],
       });
 
       extensionEnabled = result.enabled;
+      autoTranslateEnabled = result.autoTranslate;
       const currentDomain = getCurrentDomain();
       translationEnabled =
         extensionEnabled && result.enabledSites.includes(currentDomain);
@@ -43,9 +46,9 @@
   }
 
   /**
-   * Process a single text node
+   * Process a single text node with optional auto-translation
    */
-  function processTextNode(node) {
+  async function processTextNode(node) {
     if (
       !translationEnabled ||
       !node ||
@@ -55,14 +58,28 @@
       return;
     }
 
-    const originalText = node.nodeValue;
+    let textToProcess = node.nodeValue;
+
+    // Auto-translate if enabled and text is not Belarusian
+    if (
+      autoTranslateEnabled &&
+      !belarusianTransliterator.isBelarusian(textToProcess)
+    ) {
+      try {
+        textToProcess = await googleTranslateHelper.translateIfNeeded(
+          textToProcess
+        );
+      } catch (e) {
+        console.error("Łacinka: Auto-translation failed", e);
+      }
+    }
 
     // Check if the text contains Belarusian characters
-    if (belarusianTransliterator.isBelarusian(originalText)) {
+    if (belarusianTransliterator.isBelarusian(textToProcess)) {
       const transliteratedText =
-        belarusianTransliterator.transliterate(originalText);
+        belarusianTransliterator.transliterate(textToProcess);
 
-      if (transliteratedText !== originalText) {
+      if (transliteratedText !== node.nodeValue) {
         node.nodeValue = transliteratedText;
         processedNodes.add(node);
       }
@@ -72,12 +89,12 @@
   /**
    * Process element attributes that contain text
    */
-  function processElementAttributes(element) {
+  async function processElementAttributes(element) {
     if (!element || !element.getAttribute) {
       return;
     }
 
-    // Attributes that commonly contain visible text
+    // Attributes that commonly contain visible text (excluding value)
     const textAttributes = [
       "placeholder",
       "aria-label",
@@ -88,37 +105,41 @@
       "data-tooltip",
     ];
 
-    textAttributes.forEach((attr) => {
+    for (const attr of textAttributes) {
       const value = element.getAttribute(attr);
-      if (value && belarusianTransliterator.isBelarusian(value)) {
-        const transliteratedValue =
-          belarusianTransliterator.transliterate(value);
-        if (transliteratedValue !== value) {
-          element.setAttribute(attr, transliteratedValue);
-        }
-      }
-    });
+      if (value) {
+        let textToProcess = value;
 
-    // Special handling for input/textarea values (but not while user is typing)
-    if (
-      (element.tagName === "INPUT" || element.tagName === "TEXTAREA") &&
-      element !== document.activeElement
-    ) {
-      const value = element.value;
-      if (value && belarusianTransliterator.isBelarusian(value)) {
-        const transliteratedValue =
-          belarusianTransliterator.transliterate(value);
-        if (transliteratedValue !== value) {
-          element.value = transliteratedValue;
+        // Auto-translate if enabled and text is not Belarusian
+        if (
+          autoTranslateEnabled &&
+          !belarusianTransliterator.isBelarusian(textToProcess)
+        ) {
+          try {
+            textToProcess = await googleTranslateHelper.translateIfNeeded(
+              textToProcess
+            );
+          } catch (e) {
+            console.error("Łacinka: Auto-translation failed for attribute", e);
+          }
+        }
+
+        if (belarusianTransliterator.isBelarusian(textToProcess)) {
+          const transliteratedValue =
+            belarusianTransliterator.transliterate(textToProcess);
+          if (transliteratedValue !== value) {
+            element.setAttribute(attr, transliteratedValue);
+          }
         }
       }
     }
+    // Note: Input/textarea values are NOT processed to avoid interfering with user input
   }
 
   /**
    * Recursively process all text nodes in an element
    */
-  function processElement(element) {
+  async function processElement(element) {
     if (!element || processedNodes.has(element)) {
       return;
     }
@@ -130,13 +151,14 @@
     }
 
     // Process element attributes
-    processElementAttributes(element);
+    await processElementAttributes(element);
 
     // Process attributes of all child elements
     if (element.querySelectorAll) {
-      element.querySelectorAll("*").forEach((child) => {
-        processElementAttributes(child);
-      });
+      const children = Array.from(element.querySelectorAll("*"));
+      for (const child of children) {
+        await processElementAttributes(child);
+      }
     }
 
     // Process all child nodes
@@ -158,7 +180,9 @@
     }
 
     // Process collected nodes
-    nodesToProcess.forEach((node) => processTextNode(node));
+    for (const node of nodesToProcess) {
+      await processTextNode(node);
+    }
 
     processedNodes.add(element);
   }
@@ -166,8 +190,10 @@
   /**
    * Process the entire page
    */
-  function processPage() {
-    processElement(document.body);
+  async function processPage() {
+    if (document.body) {
+      await processElement(document.body);
+    }
   }
 
   /**
@@ -175,15 +201,19 @@
    */
   function setupObserver() {
     const observer = new MutationObserver(function (mutations) {
-      mutations.forEach(function (mutation) {
+      mutations.forEach(async function (mutation) {
+        if (!translationEnabled) {
+          return;
+        }
+
         // Process added nodes
-        mutation.addedNodes.forEach(function (node) {
+        for (const node of mutation.addedNodes) {
           if (node.nodeType === Node.ELEMENT_NODE) {
-            processElement(node);
+            await processElement(node);
           } else if (node.nodeType === Node.TEXT_NODE) {
-            processTextNode(node);
+            await processTextNode(node);
           }
-        });
+        }
 
         // Process modified text content
         if (
@@ -192,7 +222,7 @@
         ) {
           // Remove from processed set to allow re-processing
           processedNodes.delete(mutation.target);
-          processTextNode(mutation.target);
+          await processTextNode(mutation.target);
         }
 
         // Process attribute changes
@@ -200,7 +230,7 @@
           mutation.type === "attributes" &&
           mutation.target.nodeType === Node.ELEMENT_NODE
         ) {
-          processElementAttributes(mutation.target);
+          await processElementAttributes(mutation.target);
         }
       });
     });
@@ -290,7 +320,6 @@
         "alt",
         "label",
         "data-tooltip",
-        "value",
       ],
     });
 
@@ -304,11 +333,12 @@
     const shouldTranslate = await checkTranslationStatus();
 
     if (shouldTranslate && document.body) {
-      processPage();
+      await processPage();
       setupObserver();
       console.log(
         "Belarusian Łacinka Converter: Translation enabled on",
-        getCurrentDomain()
+        getCurrentDomain(),
+        autoTranslateEnabled ? "(with auto-translate)" : ""
       );
     }
   }
@@ -369,6 +399,14 @@
             }
           });
         }
+      } else if (request.action === "updateAutoTranslate") {
+        autoTranslateEnabled = request.autoTranslate;
+        // Clear cache when toggling auto-translate
+        if (typeof googleTranslateHelper !== "undefined") {
+          googleTranslateHelper.clearCache();
+        }
+        // Reload to apply changes
+        reloadPage();
       }
     });
   }
