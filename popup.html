@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Belarusian Łacinka Converter</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>🇧🇾 Łacinka Converter</h1>
+        <p class="subtitle">Belarusian Cyrillic to Latin</p>
+      </header>
+
+      <main>
+        <!-- Global Toggle -->
+        <div class="control-group">
+          <div class="toggle-container">
+            <label class="toggle-label">
+              <input type="checkbox" id="globalToggle" class="toggle-input" />
+              <span class="toggle-slider"></span>
+              <span class="toggle-text">Extension Enabled</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Current Site Controls -->
+        <div class="control-group">
+          <h2>Current Site</h2>
+          <div id="currentSiteInfo">
+            <p class="site-url" id="currentUrl">Loading...</p>
+            <div class="site-controls">
+              <button id="enableSite" class="btn btn-primary">
+                Enable Translation
+              </button>
+              <button id="disableSite" class="btn btn-secondary">
+                Disable Translation
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Enabled Sites List -->
+        <div class="control-group">
+          <h2>Enabled Sites</h2>
+          <div id="enabledSitesList" class="sites-list">
+            <p class="empty-state">No sites enabled yet</p>
+          </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="control-group">
+          <h2>Actions</h2>
+          <div class="action-buttons">
+            <button id="refreshPage" class="btn btn-action">
+              🔄 Refresh Page
+            </button>
+            <button id="clearAllSites" class="btn btn-danger">
+              🗑️ Clear All Sites
+            </button>
+          </div>
+        </div>
+      </main>
+
+      <footer>
+        <p class="version">v1.0.0</p>
+      </footer>
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
