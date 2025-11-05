@@ -2,6 +2,73 @@
  * Popup UI Controller for Belarusian Łacinka Converter
  */
 
+// Translations
+const translations = {
+  "be-latn": {
+    appTitle: "Łacinka Kanvertar",
+    appSubtitle: "Biełaruskaja kirylica ŭ łacinkę",
+    extensionEnabled: "Pašyreńnie ŭklučanaje",
+    autoTranslate: "Aŭtamatyčny pierakład na biełaruskuju (Beta)",
+    autoTranslateHint:
+      "Pierakladaje niebiełaruski tekst na biełaruskuju praz Google Translate, a potym kanvertuje ŭ łacinkę",
+    currentSite: "Dziejny sajt",
+    loading: "Zahruzka...",
+    enableTranslation: "Uklučyć pierakład",
+    disableTranslation: "Vyklučyć pierakład",
+    translationEnabled: "✓ Pierakład uklučany",
+    enabledSites: "Uklučanyja sajty",
+    noSitesEnabled: "Nijakix sajtaŭ jašče nie ŭklučana",
+    actions: "Dziejańni",
+    refreshPage: "Abnavić staronku",
+    clearAllSites: "Ačyścić usie sajty",
+    remove: "Vydalić",
+    confirmClear: "Vy ŭpeŭnienyja, što chočacie vydalić usie ŭklučanyja sajty?",
+    invalidUrl: "Niekarektnaja URL-adresa",
+  },
+  be: {
+    appTitle: "Łacinka Канвертар",
+    appSubtitle: "Беларуская кірыліца ў łacinkę",
+    extensionEnabled: "Пашырэнне ўключанае",
+    autoTranslate: "Аўтаматычны пераклад на беларускую (Beta)",
+    autoTranslateHint:
+      "Перакладае небеларускі тэкст на беларускую праз Google Translate, а потым канвертуе ў łacinkę",
+    currentSite: "Дзейны сайт",
+    loading: "Загрузка...",
+    enableTranslation: "Уключыць пераклад",
+    disableTranslation: "Выключыць пераклад",
+    translationEnabled: "✓ Пераклад уключаны",
+    enabledSites: "Уключаныя сайты",
+    noSitesEnabled: "Нiякiх сайтаў яшчэ не ўключана",
+    actions: "Дзеянні",
+    refreshPage: "Абнавіць старонку",
+    clearAllSites: "Ачысціць усе сайты",
+    remove: "Выдаліць",
+    confirmClear: "Вы ўпэўненыя, што хочаце выдаліць усе ўключаныя сайты?",
+    invalidUrl: "Некарэктная URL-адраса",
+  },
+  en: {
+    appTitle: "Łacinka Converter",
+    appSubtitle: "Belarusian Cyrillic to Latin",
+    extensionEnabled: "Extension Enabled",
+    autoTranslate: "Auto-translate to Belarusian (Beta)",
+    autoTranslateHint:
+      "Translates non-Belarusian text to Belarusian using Google Translate, then converts to Łacinka",
+    currentSite: "Current Site",
+    loading: "Loading...",
+    enableTranslation: "Enable Translation",
+    disableTranslation: "Disable Translation",
+    translationEnabled: "✓ Translation Enabled",
+    enabledSites: "Enabled Sites",
+    noSitesEnabled: "No sites enabled yet",
+    actions: "Actions",
+    refreshPage: "Refresh Page",
+    clearAllSites: "Clear All Sites",
+    remove: "Remove",
+    confirmClear: "Are you sure you want to remove all enabled sites?",
+    invalidUrl: "Invalid URL",
+  },
+};
+
 // DOM Elements
 const globalToggle = document.getElementById("globalToggle");
 const autoTranslateToggle = document.getElementById("autoTranslateToggle");
@@ -14,6 +81,65 @@ const clearAllSitesBtn = document.getElementById("clearAllSites");
 
 let currentTab = null;
 let currentDomain = null;
+let currentLanguage = "be-latn";
+
+/**
+ * Set current language
+ */
+async function setLanguage(lang) {
+  currentLanguage = lang;
+
+  // Save to storage
+  await chrome.storage.sync.set({ uiLanguage: lang });
+
+  // Update language buttons UI
+  updateLanguageUI();
+
+  // Update all translated elements with data-i18n attributes
+  document.querySelectorAll("[data-i18n]").forEach((element) => {
+    const key = element.getAttribute("data-i18n");
+    if (translations[lang] && translations[lang][key]) {
+      element.textContent = translations[lang][key];
+    }
+  });
+
+  // Reload settings and update dynamic content
+  const settings = await loadSettings();
+
+  // Update current URL display if needed
+  if (currentDomain) {
+    // Keep the domain name as is
+    const isSiteEnabled = settings.enabledSites.includes(currentDomain);
+    if (isSiteEnabled) {
+      enableSiteBtn.textContent =
+        translations[currentLanguage].translationEnabled;
+    } else {
+      enableSiteBtn.textContent =
+        translations[currentLanguage].enableTranslation;
+    }
+  } else if (currentTab && currentTab.url) {
+    // If we couldn't get domain, show invalid URL message
+    currentUrlEl.textContent = translations[currentLanguage].invalidUrl;
+  } else {
+    // If no tab loaded yet, show loading message
+    currentUrlEl.textContent = translations[currentLanguage].loading;
+  }
+
+  // Update sites list with new language
+  updateSitesList(settings.enabledSites);
+}
+
+/**
+ * Update language buttons UI
+ */
+function updateLanguageUI() {
+  document.querySelectorAll(".lang-btn").forEach((btn) => {
+    btn.classList.remove("active");
+    if (btn.getAttribute("data-lang") === currentLanguage) {
+      btn.classList.add("active");
+    }
+  });
+}
 
 /**
  * Get the domain from a URL
@@ -35,6 +161,7 @@ async function loadSettings() {
     enabled: true,
     autoTranslate: false,
     enabledSites: [],
+    uiLanguage: "be-latn",
   });
   return result;
 }
@@ -51,6 +178,10 @@ async function saveSettings(settings) {
  */
 async function updateUI() {
   const settings = await loadSettings();
+
+  // Set language
+  currentLanguage = settings.uiLanguage || "be-latn";
+  setLanguage(currentLanguage);
 
   // Update global toggle
   globalToggle.checked = settings.enabled;
@@ -76,15 +207,19 @@ async function updateUI() {
       disableSiteBtn.disabled = !isSiteEnabled || !settings.enabled;
 
       if (isSiteEnabled) {
-        enableSiteBtn.textContent = "✓ Translation Enabled";
+        enableSiteBtn.textContent =
+          translations[currentLanguage].translationEnabled;
       } else {
-        enableSiteBtn.textContent = "Enable Translation";
+        enableSiteBtn.textContent =
+          translations[currentLanguage].enableTranslation;
       }
     } else {
-      currentUrlEl.textContent = "Invalid URL";
+      currentUrlEl.textContent = translations[currentLanguage].invalidUrl;
       enableSiteBtn.disabled = true;
       disableSiteBtn.disabled = true;
     }
+  } else {
+    currentUrlEl.textContent = translations[currentLanguage].loading;
   }
 
   // Update enabled sites list
@@ -96,8 +231,7 @@ async function updateUI() {
  */
 function updateSitesList(enabledSites) {
   if (!enabledSites || enabledSites.length === 0) {
-    enabledSitesList.innerHTML =
-      '<p class="empty-state">No sites enabled yet</p>';
+    enabledSitesList.innerHTML = `<p class="empty-state">${translations[currentLanguage].noSitesEnabled}</p>`;
     return;
   }
 
@@ -113,7 +247,7 @@ function updateSitesList(enabledSites) {
 
     const removeBtn = document.createElement("button");
     removeBtn.className = "site-item-remove";
-    removeBtn.textContent = "Remove";
+    removeBtn.textContent = translations[currentLanguage].remove;
     removeBtn.addEventListener("click", () => removeSite(site));
 
     siteItem.appendChild(domainSpan);
@@ -237,7 +371,7 @@ function refreshCurrentPage() {
  * Clear all enabled sites
  */
 async function clearAllSites() {
-  if (confirm("Are you sure you want to remove all enabled sites?")) {
+  if (confirm(translations[currentLanguage].confirmClear)) {
     const settings = await loadSettings();
     settings.enabledSites = [];
     await saveSettings(settings);
@@ -263,6 +397,14 @@ enableSiteBtn.addEventListener("click", enableCurrentSite);
 disableSiteBtn.addEventListener("click", disableCurrentSite);
 refreshPageBtn.addEventListener("click", refreshCurrentPage);
 clearAllSitesBtn.addEventListener("click", clearAllSites);
+
+// Language selector event listeners
+document.querySelectorAll(".lang-btn").forEach((btn) => {
+  btn.addEventListener("click", async () => {
+    const lang = btn.getAttribute("data-lang");
+    await setLanguage(lang);
+  });
+});
 
 // Initialize UI when popup opens
 document.addEventListener("DOMContentLoaded", updateUI);

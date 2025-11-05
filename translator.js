@@ -7,6 +7,78 @@ class GoogleTranslateHelper {
   constructor() {
     this.apiUrl = "https://translate.googleapis.com/translate_a/single";
     this.cache = new Map();
+    this.storageKey = "lacinka_translation_cache";
+    this.maxStorageSize = 10 * 1024 * 1024; // 10 MB in bytes
+    this.initialized = false;
+  }
+
+  /**
+   * Initialize cache from chrome.storage.local
+   */
+  async initCache() {
+    if (this.initialized) return;
+
+    try {
+      const result = await chrome.storage.local.get(this.storageKey);
+      if (result[this.storageKey]) {
+        const cached = JSON.parse(result[this.storageKey]);
+        this.cache = new Map(cached);
+        console.log(`Łacinka: Loaded ${this.cache.size} cached translations`);
+      }
+    } catch (e) {
+      console.error("Łacinka: Failed to load cache", e);
+    }
+
+    this.initialized = true;
+  }
+
+  /**
+   * Save cache to chrome.storage.local with size limit
+   */
+  async saveCache() {
+    try {
+      const cacheArray = Array.from(this.cache.entries());
+      const cacheString = JSON.stringify(cacheArray);
+      const sizeInBytes = new Blob([cacheString]).size;
+
+      // If cache exceeds max size, remove oldest entries (from start)
+      if (sizeInBytes > this.maxStorageSize) {
+        console.log(
+          `Łacinka: Cache size ${(sizeInBytes / 1024 / 1024).toFixed(
+            2
+          )}MB exceeds limit, trimming...`
+        );
+
+        // Remove entries from the start until we're under the limit
+        while (this.cache.size > 0) {
+          const firstKey = this.cache.keys().next().value;
+          this.cache.delete(firstKey);
+
+          const newCacheArray = Array.from(this.cache.entries());
+          const newCacheString = JSON.stringify(newCacheArray);
+          const newSize = new Blob([newCacheString]).size;
+
+          if (newSize <= this.maxStorageSize * 0.9) {
+            // Keep it at 90% to have some buffer
+            console.log(
+              `Łacinka: Cache trimmed to ${this.cache.size} entries (${(
+                newSize /
+                1024 /
+                1024
+              ).toFixed(2)}MB)`
+            );
+            break;
+          }
+        }
+      }
+
+      // Save to storage
+      await chrome.storage.local.set({
+        [this.storageKey]: JSON.stringify(Array.from(this.cache.entries())),
+      });
+    } catch (e) {
+      console.error("Łacinka: Failed to save cache", e);
+    }
   }
 
   /**
@@ -47,6 +119,9 @@ class GoogleTranslateHelper {
       return text;
     }
 
+    // Initialize cache if not done yet
+    await this.initCache();
+
     // Check cache
     const cacheKey = text.substring(0, 100);
     if (this.cache.has(cacheKey)) {
@@ -72,10 +147,9 @@ class GoogleTranslateHelper {
         // Cache result
         this.cache.set(cacheKey, translated);
 
-        // Limit cache size
-        if (this.cache.size > 100) {
-          const firstKey = this.cache.keys().next().value;
-          this.cache.delete(firstKey);
+        // Save cache periodically (every 10 new entries)
+        if (this.cache.size % 10 === 0) {
+          await this.saveCache();
         }
 
         return translated;
@@ -128,18 +202,22 @@ class GoogleTranslateHelper {
   }
 
   /**
-   * Batch translate multiple texts at once (with chunking to avoid URL length limits)
+   * Batch translate multiple texts at once (withing to avoid URL length limits)
    * Returns array of translated texts in same order as input
+   * @param {Array} texts - Array of texts to translate
+   * @param {Function} onProgress - Optional callback for progress updates (currentChunk, totalChunks)
    */
-  async batchTranslate(texts) {
+  async batchTranslate(texts, onProgress = null) {
     if (!texts || texts.length === 0) {
       return [];
     }
 
+    // Initialize cache
+    await this.initCache();
+
     const results = new Array(texts.length);
     const separator = " ◆◇◆ ";
-    const maxUrlLength = 6000; // Safe limit for URL length (Google allows ~8KB)
-    const maxChunkSize = 50; // Maximum texts per chunk
+    const maxChunkSymbols = 2000; // Maximum 2000 symbols per chunk
 
     // Filter out empty texts and track indices
     const nonEmptyData = [];
@@ -155,28 +233,26 @@ class GoogleTranslateHelper {
       return texts;
     }
 
-    // Split into chunks based on URL length and count
+    // Split into chunks based on symbol count
     const chunks = [];
     let currentChunk = [];
-    let currentLength = 0;
+    let currentSymbolCount = 0;
 
     for (const item of nonEmptyData) {
-      const itemLength =
-        encodeURIComponent(item.text).length + separator.length;
+      const itemSymbolCount = item.text.length + separator.length;
 
-      // Start new chunk if adding this item would exceed limits
+      // Start new chunk if adding this item would exceed 2000 symbols
       if (
         currentChunk.length > 0 &&
-        (currentLength + itemLength > maxUrlLength ||
-          currentChunk.length >= maxChunkSize)
+        currentSymbolCount + itemSymbolCount > maxChunkSymbols
       ) {
         chunks.push(currentChunk);
         currentChunk = [];
-        currentLength = 0;
+        currentSymbolCount = 0;
       }
 
       currentChunk.push(item);
-      currentLength += itemLength;
+      currentSymbolCount += itemSymbolCount;
     }
 
     // Add remaining chunk
@@ -184,7 +260,11 @@ class GoogleTranslateHelper {
       chunks.push(currentChunk);
     }
 
-    // Process each chunk
+    console.log(
+      `Łacinka: Starting batch translation - ${chunks.length} chunks, ${nonEmptyData.length} texts total`
+    );
+
+    // Process each chunk with progress reporting
     for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
       const chunk = chunks[chunkIndex];
       const combinedText = chunk.map((item) => item.text).join(separator);
@@ -203,11 +283,17 @@ class GoogleTranslateHelper {
           results[item.index] = translatedParts[i] || item.text;
         });
 
+        const progress = Math.round(((chunkIndex + 1) / chunks.length) * 100);
         console.log(
           `Łacinka: Translated chunk ${chunkIndex + 1}/${chunks.length} (${
             chunk.length
-          } texts)`
+          } texts) - ${progress}% complete`
         );
+
+        // Call progress callback if provided
+        if (onProgress) {
+          onProgress(chunkIndex + 1, chunks.length, progress);
+        }
       } catch (e) {
         console.error(`Łacinka: Chunk ${chunkIndex + 1} translation failed`, e);
         // On failure, keep original texts

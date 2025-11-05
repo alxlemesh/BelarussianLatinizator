@@ -70,7 +70,41 @@
     };
 
     // Belarusian-specific characters that indicate Belarusian text
-    this.belarusianIndicators = ["ў", "Ў", "і", "І", "ё", "Ё"];
+    this.belarusianIndicators = ["ў", "Ў", "і", "І"];
+
+    // Non-Belarusian Cyrillic characters (Russian/Ukrainian/Serbian/Macedonian specific)
+    // Russian: и, ы, э, ъ
+    // Ukrainian: ґ, є, ї, и
+    // Serbian: ћ, џ, ђ
+    // Macedonian: ќ, ѓ, ѕ
+    this.nonBelarusianCyrillic = [
+      "и",
+      "И", // Russian/Ukrainian и (Belarusian uses і)
+      "ы",
+      "Ы", // Russian ы (Belarusian has this but in context with и it's likely Russian)
+      "э",
+      "Э", // Russian э (rare in Belarusian)
+      "ъ",
+      "Ъ", // Hard sign (Russian/Bulgarian)
+      "є",
+      "Є", // Ukrainian є
+      "ї",
+      "Ї", // Ukrainian ї
+      "ґ",
+      "Ґ", // Ukrainian ґ (very rare in Belarusian, usually indicates Ukrainian)
+      "ћ",
+      "Ћ", // Serbian ћ
+      "џ",
+      "Џ", // Serbian џ
+      "ђ",
+      "Ђ", // Serbian ђ
+      "ќ",
+      "Ќ", // Macedonian ќ
+      "ѓ",
+      "Ѓ", // Macedonian ѓ
+      "ѕ",
+      "Ѕ", // Macedonian ѕ
+    ];
   }
 
   /**
@@ -102,10 +136,29 @@
   }
 
   /**
+   * Check if text contains non-Belarusian Cyrillic characters
+   */
+  hasNonBelarusianCyrillic(text) {
+    if (!text || typeof text !== "string") return false;
+
+    for (let char of this.nonBelarusianCyrillic) {
+      if (text.includes(char)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
    * Check if text contains Belarusian-specific characters
    */
   isBelarusian(text) {
     if (!text || typeof text !== "string") return false;
+
+    // If contains non-Belarusian Cyrillic, it's NOT Belarusian
+    if (this.hasNonBelarusianCyrillic(text)) {
+      return false;
+    }
 
     // Check for specific Belarusian characters
     for (let char of this.belarusianIndicators) {
@@ -115,15 +168,41 @@
     }
 
     // Additional check: if text has Cyrillic and reasonable length
+    // But no non-Belarusian characters
     const cyrillicCount = (text.match(/[а-яА-ЯёЁ]/g) || []).length;
     return cyrillicCount > 3; // At least a few Cyrillic characters
   }
 
   /**
+   * Check if text needs translation (contains non-Belarusian Cyrillic)
+   */
+  needsTranslation(text) {
+    if (!text || typeof text !== "string") return false;
+
+    // Check if it has non-Belarusian Cyrillic characters
+    const hasNonBelarusian = this.hasNonBelarusianCyrillic(text);
+
+    // If it has non-Belarusian Cyrillic, it needs translation
+    // (unless it's already been translated and has no Cyrillic left)
+    if (hasNonBelarusian) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
    * Transliterate Belarusian Cyrillic text to Łacinka
    */
-  transliterate(text) {
+  transliterate(text, forceTransliterate = false) {
     if (!text || typeof text !== "string") return text;
+
+    // CRITICAL: Do not transliterate if text contains non-Belarusian Cyrillic
+    // This prevents mixed Latin-Cyrillic output like "Pиrotiechnиčieskaja"
+    // UNLESS forceTransliterate is true (used after auto-translation)
+    if (!forceTransliterate && this.hasNonBelarusianCyrillic(text)) {
+      return text; // Return original text unchanged
+    }
 
     let result = "";
 

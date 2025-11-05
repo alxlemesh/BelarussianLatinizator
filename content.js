@@ -60,10 +60,26 @@
 
     let textToProcess = translatedText || node.nodeValue;
 
-    // Check if the text contains Belarusian characters
-    if (belarusianTransliterator.isBelarusian(textToProcess)) {
-      const transliteratedText =
-        belarusianTransliterator.transliterate(textToProcess);
+    // If we received translated text, it means it was already translated from another language
+    // In this case, we should always transliterate it (assuming it's now in Belarusian Cyrillic)
+    const wasTranslated = translatedText !== null;
+
+    // If text contains non-Belarusian Cyrillic and auto-translate is NOT enabled, skip it
+    // This prevents mixed Latin-Cyrillic text like "Pиrotiechnиčieskaja"
+    if (
+      !wasTranslated &&
+      belarusianTransliterator.needsTranslation(textToProcess) &&
+      !autoTranslateEnabled
+    ) {
+      return; // Skip transliteration - needs translation first
+    }
+
+    // Check if the text contains Belarusian characters OR was translated
+    if (wasTranslated || belarusianTransliterator.isBelarusian(textToProcess)) {
+      const transliteratedText = belarusianTransliterator.transliterate(
+        textToProcess,
+        wasTranslated
+      );
 
       if (transliteratedText !== node.nodeValue) {
         node.nodeValue = transliteratedText;
@@ -87,10 +103,10 @@
 
     let textToProcess = node.nodeValue;
 
-    // Auto-translate if enabled and text is not Belarusian
+    // Auto-translate if enabled and text needs translation (has non-Belarusian Cyrillic)
     if (
       autoTranslateEnabled &&
-      !belarusianTransliterator.isBelarusian(textToProcess)
+      belarusianTransliterator.needsTranslation(textToProcess)
     ) {
       try {
         textToProcess = await googleTranslateHelper.translateIfNeeded(
@@ -132,14 +148,33 @@
       "data-tooltip",
     ];
 
+    // If we received translated attributes, it means they were already translated
+    const wasTranslated = translatedAttributes !== null;
+
     for (const attr of textAttributes) {
       const value = element.getAttribute(attr);
       if (value) {
         let textToProcess = translatedAttributes?.[attr] || value;
 
-        if (belarusianTransliterator.isBelarusian(textToProcess)) {
-          const transliteratedValue =
-            belarusianTransliterator.transliterate(textToProcess);
+        // Skip if contains non-Belarusian Cyrillic and auto-translate is not enabled
+        // But if text was already translated, always process it
+        if (
+          !wasTranslated &&
+          belarusianTransliterator.needsTranslation(textToProcess) &&
+          !autoTranslateEnabled
+        ) {
+          continue; // Skip this attribute
+        }
+
+        // If was translated or is Belarusian, transliterate it
+        if (
+          wasTranslated ||
+          belarusianTransliterator.isBelarusian(textToProcess)
+        ) {
+          const transliteratedValue = belarusianTransliterator.transliterate(
+            textToProcess,
+            wasTranslated
+          );
           if (transliteratedValue !== value) {
             element.setAttribute(attr, transliteratedValue);
           }
@@ -324,7 +359,12 @@
       // Helper function to check if text should be translated
       const shouldTranslate = (text) => {
         if (!text || text.trim().length === 0) return false;
+
+        // If it's already Belarusian, don't translate
         if (belarusianTransliterator.isBelarusian(text)) return false;
+
+        // Only translate if it needs translation (has non-Belarusian Cyrillic)
+        if (!belarusianTransliterator.needsTranslation(text)) return false;
 
         // Skip numeric-only content (like "5", "123", etc.)
         if (/^\d+$/.test(text.trim())) return false;
@@ -371,9 +411,56 @@
           console.log(
             `Łacinka: Batch translating ${textsToTranslate.length} texts...`
           );
+
+          // Create progress indicator
+          const progressDiv = document.createElement("div");
+          progressDiv.id = "lacinka-progress";
+          progressDiv.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.85);
+            color: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            z-index: 999999;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-size: 14px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            min-width: 200px;
+          `;
+          progressDiv.innerHTML = `
+            <div style="margin-bottom: 8px; font-weight: 600;">Łacinka Translation</div>
+            <div id="lacinka-progress-text">Starting...</div>
+            <div style="margin-top: 8px; background: rgba(255,255,255,0.2); height: 6px; border-radius: 3px; overflow: hidden;">
+              <div id="lacinka-progress-bar" style="background: #4CAF50; height: 100%; width: 0%; transition: width 0.3s;"></div>
+            </div>
+          `;
+          document.body.appendChild(progressDiv);
+
           const translatedTexts = await googleTranslateHelper.batchTranslate(
-            textsToTranslate
+            textsToTranslate,
+            (current, total, percent) => {
+              const progressText = document.getElementById(
+                "lacinka-progress-text"
+              );
+              const progressBar = document.getElementById(
+                "lacinka-progress-bar"
+              );
+              if (progressText) {
+                progressText.textContent = `Chunk ${current}/${total} (${percent}%)`;
+              }
+              if (progressBar) {
+                progressBar.style.width = `${percent}%`;
+              }
+            }
           );
+
+          // Remove progress indicator
+          setTimeout(() => {
+            const elem = document.getElementById("lacinka-progress");
+            if (elem) elem.remove();
+          }, 1500);
 
           // Apply translations to text nodes
           let translationIndex = 0;

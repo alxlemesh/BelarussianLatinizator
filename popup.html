@@ -9,8 +9,17 @@
   <body>
     <div class="container">
       <header>
-        <h1>🇧🇾 Łacinka Converter</h1>
-        <p class="subtitle">Belarusian Cyrillic to Latin</p>
+        <h1>🇧🇾 <span data-i18n="appTitle">Łacinka Converter</span></h1>
+        <p class="subtitle" data-i18n="appSubtitle">
+          Belarusian Cyrillic to Latin
+        </p>
+
+        <!-- Language Selector -->
+        <div class="language-selector">
+          <button class="lang-btn" data-lang="be-latn">Be ł</button>
+          <button class="lang-btn" data-lang="be">Бел</button>
+          <button class="lang-btn" data-lang="en">Eng</button>
+        </div>
       </header>
 
       <main>
@@ -20,7 +29,9 @@
             <label class="toggle-label">
               <input type="checkbox" id="globalToggle" class="toggle-input" />
               <span class="toggle-slider"></span>
-              <span class="toggle-text">Extension Enabled</span>
+              <span class="toggle-text" data-i18n="extensionEnabled"
+                >Extension Enabled</span
+              >
             </label>
           </div>
         </div>
@@ -35,9 +46,11 @@
                 class="toggle-input"
               />
               <span class="toggle-slider"></span>
-              <span class="toggle-text">Auto-translate to Belarusian</span>
+              <span class="toggle-text" data-i18n="autoTranslate"
+                >Auto-translate to Belarusian (Beta)</span
+              >
             </label>
-            <p class="toggle-hint">
+            <p class="toggle-hint" data-i18n="autoTranslateHint">
               Translates non-Belarusian text to Belarusian using Google
               Translate, then converts to Łacinka
             </p>
@@ -46,14 +59,22 @@
 
         <!-- Current Site Controls -->
         <div class="control-group">
-          <h2>Current Site</h2>
+          <h2 data-i18n="currentSite">Current Site</h2>
           <div id="currentSiteInfo">
             <p class="site-url" id="currentUrl">Loading...</p>
             <div class="site-controls">
-              <button id="enableSite" class="btn btn-primary">
+              <button
+                id="enableSite"
+                class="btn btn-primary"
+                data-i18n="enableTranslation"
+              >
                 Enable Translation
               </button>
-              <button id="disableSite" class="btn btn-secondary">
+              <button
+                id="disableSite"
+                class="btn btn-secondary"
+                data-i18n="disableTranslation"
+              >
                 Disable Translation
               </button>
             </div>
@@ -62,21 +83,23 @@
 
         <!-- Enabled Sites List -->
         <div class="control-group">
-          <h2>Enabled Sites</h2>
+          <h2 data-i18n="enabledSites">Enabled Sites</h2>
           <div id="enabledSitesList" class="sites-list">
-            <p class="empty-state">No sites enabled yet</p>
+            <p class="empty-state" data-i18n="noSitesEnabled">
+              No sites enabled yet
+            </p>
           </div>
         </div>
 
         <!-- Quick Actions -->
         <div class="control-group">
-          <h2>Actions</h2>
+          <h2 data-i18n="actions">Actions</h2>
           <div class="action-buttons">
             <button id="refreshPage" class="btn btn-action">
-              🔄 Refresh Page
+              🔄 <span data-i18n="refreshPage">Refresh Page</span>
             </button>
             <button id="clearAllSites" class="btn btn-danger">
-              🗑️ Clear All Sites
+              🗑️ <span data-i18n="clearAllSites">Clear All Sites</span>
             </button>
           </div>
         </div>
