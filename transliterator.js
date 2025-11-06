@@ -6,8 +6,12 @@
  * Key rules:
  * - г → h (voiced glottal fricative /ɦ/)
  * - ґ → g (voiced velar plosive /g/, rare in modern Belarusian)
+ * - в → v (at word start/after consonant/at morpheme boundary - consonant [v])
+ * - в → w (after vowel, intervocalic - semivowel [w]/[u̯])
  * - е → je (at word start/after vowel/ъ/ь), ie (after consonant)
- * - ё → jo (always)
+ * - ё → jo (at word start/after vowel), io (after consonant - shows palatalization)
+ * - ю → ju (at word start/after vowel), iu (after consonant - shows palatalization)
+ * - я → ja (at word start/after vowel), ia (after consonant - shows palatalization)
  * - э → e (pure e sound)
  * - л → l (soft, before я/е/і/ё/ю/ь), ł (hard, before а/о/у/ы/э or consonants)
  */ class BelarusianTransliterator {
@@ -17,7 +21,6 @@
       // Uppercase
       А: "A",
       Б: "B",
-      В: "V",
       Г: "H",
       Ґ: "G",
       Д: "D",
@@ -44,7 +47,6 @@
       // Lowercase
       а: "a",
       б: "b",
-      в: "v",
       г: "h",
       ґ: "g",
       д: "d",
@@ -82,8 +84,6 @@
       "И", // Russian/Ukrainian и (Belarusian uses і)
       "ы",
       "Ы", // Russian ы (Belarusian has this but in context with и it's likely Russian)
-      "э",
-      "Э", // Russian э (rare in Belarusian)
       "ъ",
       "Ъ", // Hard sign (Russian/Bulgarian)
       "є",
@@ -105,6 +105,32 @@
       "ѕ",
       "Ѕ", // Macedonian ѕ
     ];
+  }
+
+  /**
+   * Check if position is at a likely morpheme boundary (prefix-root)
+   * Common Belarusian prefixes: пра-, пры-, за-, на-, раз-, без-, etc.
+   */
+  isMorphemeBoundary(text, index) {
+    if (index < 2) return false;
+
+    // Check for common 3-letter prefixes before в
+    const prefix3 = text.substring(index - 3, index).toLowerCase();
+    const commonPrefixes3 = ["пра", "пры", "раз", "роз", "без"];
+    if (commonPrefixes3.includes(prefix3)) {
+      return true;
+    }
+
+    // Check for common 2-letter prefixes before в
+    if (index >= 2) {
+      const prefix2 = text.substring(index - 2, index).toLowerCase();
+      const commonPrefixes2 = ["за", "на", "па", "да", "ад", "аб"];
+      if (commonPrefixes2.includes(prefix2)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   /**
@@ -212,6 +238,34 @@
       const prevChar = i > 0 ? text[i - 1] : null;
       const isStart = this.isWordStart(text, i);
 
+      // Handle В/в with contextual rules
+      // v: at beginning of syllable or before vowels (consonant [v])
+      // w: after vowel when NOT before another vowel or at morpheme boundary
+      if (char === "В" || char === "в") {
+        const isUpper = char === "В";
+        const atMorphemeBoundary = this.isMorphemeBoundary(text, i);
+
+        // Use 'v' when в acts as a consonant:
+        // 1. At word start, OR
+        // 2. After a consonant (beginning of syllable), OR
+        // 3. At morpheme boundary (prefix-root), OR
+        // 4. Before a vowel when also at word start/after consonant/at boundary
+        if (
+          isStart ||
+          (prevChar && this.isCyrillicConsonant(prevChar)) ||
+          atMorphemeBoundary
+        ) {
+          result += isUpper ? "V" : "v";
+        } else if (nextChar && this.isCyrillicVowel(nextChar)) {
+          // After vowel but before another vowel: semivowel w
+          result += isUpper ? "W" : "w";
+        } else {
+          // After vowel at end or before consonant: w
+          result += isUpper ? "W" : "w";
+        }
+        continue;
+      }
+
       // Handle Л/л with special rules based on following vowel
       if (char === "Л" || char === "л") {
         const isUpper = char === "Л";
@@ -255,14 +309,31 @@
         continue;
       }
 
-      // Handle Ё/ё - always jo
+      // Handle Ё/ё with contextual rules
+      // io: after consonants (shows palatalization)
+      // jo: at word start or after vowels
       if (char === "Ё" || char === "ё") {
         const isUpper = char === "Ё";
-        result += isUpper ? "Jo" : "jo";
+        if (
+          isStart ||
+          this.isCyrillicVowel(prevChar) ||
+          prevChar === "ь" ||
+          prevChar === "Ь" ||
+          prevChar === "'" ||
+          prevChar === "'"
+        ) {
+          // At word start or after vowel or soft sign: Jo/jo
+          result += isUpper ? "Jo" : "jo";
+        } else {
+          // After consonant: io (shows palatalization)
+          result += isUpper ? "IO" : "io";
+        }
         continue;
       }
 
       // Handle Ю/ю with contextual rules
+      // iu: after consonants (shows palatalization)
+      // ju: at word start or after vowels
       if (char === "Ю" || char === "ю") {
         const isUpper = char === "Ю";
         if (
@@ -276,13 +347,15 @@
           // At word start or after vowel or soft sign: Ju/ju
           result += isUpper ? "Ju" : "ju";
         } else {
-          // After consonant: u
-          result += isUpper ? "U" : "u";
+          // After consonant: iu (shows palatalization)
+          result += isUpper ? "IU" : "iu";
         }
         continue;
       }
 
       // Handle Я/я with contextual rules
+      // ia: after consonants (shows palatalization)
+      // ja: at word start or after vowels
       if (char === "Я" || char === "я") {
         const isUpper = char === "Я";
         if (
@@ -296,8 +369,8 @@
           // At word start or after vowel or soft sign: Ja/ja
           result += isUpper ? "Ja" : "ja";
         } else {
-          // After consonant: a
-          result += isUpper ? "A" : "a";
+          // After consonant: ia (shows palatalization)
+          result += isUpper ? "IA" : "ia";
         }
         continue;
       }
